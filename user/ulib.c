@@ -97,7 +97,7 @@ atoi(const char *s)
 
 void*
 memmove(void *vdst, const void *vsrc, int n)
-{
+{//nb!!!
   char *dst;
   const char *src;
 
