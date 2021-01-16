@@ -229,6 +229,7 @@ userinit(void)
   p->cwd = namei("/");
 
   p->state = RUNNABLE;
+  p->trace_arg = -1;
 
   release(&p->lock);
 }
@@ -294,6 +295,9 @@ fork(void)
   pid = np->pid;
 
   np->state = RUNNABLE;
+
+  //added by me to support trace.
+  np->trace_arg=p->trace_arg;
 
   release(&np->lock);
 
@@ -692,4 +696,19 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+uint64
+procamount(void)
+{
+  struct proc *p;
+  uint64 amount=0;
+
+  for(p = proc; p < &proc[NPROC]; p++){
+    if(p->state == UNUSED)
+      continue;
+    else
+      amount++;
+  }
+  return amount;
 }
