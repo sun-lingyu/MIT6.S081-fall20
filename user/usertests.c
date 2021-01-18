@@ -2655,6 +2655,7 @@ main(int argc, char *argv[])
     {reparent, "reparent" },
     {twochildren, "twochildren"},
     {forkfork, "forkfork"},
+    //this one can cause stuck???
     {forkforkfork, "forkforkfork"},
     {argptest, "argptest"},
     {createdelete, "createdelete"},
@@ -2672,6 +2673,7 @@ main(int argc, char *argv[])
     {sbrkbasic, "sbrkbasic"},
     {sbrkmuch, "sbrkmuch"},
     {kernmem, "kernmem"},
+    //this one can cause stuck???
     {sbrkfail, "sbrkfail"},
     {sbrkarg, "sbrkarg"},
     {validatetest, "validatetest"},
