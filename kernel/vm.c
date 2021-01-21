@@ -18,6 +18,7 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
+
 /*
  * create a direct-map page table for the kernel.
  */
@@ -159,7 +160,11 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
     if((pte = walk(pagetable, a, 1)) == 0)
       return -1;
     if(*pte & PTE_V)
+    {
+      printf("%p\n",a);
       panic("remap");
+    }
+      
     *pte = PA2PTE(pa) | perm | PTE_V;
     if(a == last)
       break;
@@ -213,7 +218,7 @@ uvmcreate()
 // for the very first process.
 // sz must be less than a page.
 void
-uvminit(pagetable_t pagetable, uchar *src, uint sz)
+uvminit(pagetable_t pagetable,pagetable_t kernel_pagetable, uchar *src, uint sz)
 {
   char *mem;
 
@@ -237,7 +242,7 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
     return oldsz;
 
   oldsz = PGROUNDUP(oldsz);
-  for(a = oldsz; a < newsz; a += PGSIZE){
+  for(a = oldsz; a < newsz; a += PGSIZE){     
     mem = kalloc();
     if(mem == 0){
       uvmdealloc(pagetable, a, oldsz);
@@ -253,6 +258,7 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
   return newsz;
 }
 
+
 // Deallocate user pages to bring the process size from oldsz to
 // newsz.  oldsz and newsz need not be page-aligned, nor does newsz
 // need to be less than oldsz.  oldsz can be larger than the actual
@@ -262,7 +268,6 @@ uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 {
   if(newsz >= oldsz)
     return oldsz;
-
   if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
     int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
     uvmunmap(pagetable, PGROUNDUP(newsz), npages, 1);
@@ -308,7 +313,7 @@ uvmfree(pagetable_t pagetable, uint64 sz)
 // returns 0 on success, -1 on failure.
 // frees any allocated pages on failure.
 int
-uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
+uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)//, struct proc* child)
 {
   pte_t *pte;
   uint64 pa, i;
@@ -329,12 +334,37 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       kfree(mem);
       goto err;
     }
+    //add one line here!
+    //mappages(child->kernel_pagetable, i, PGSIZE, (uint64)mem, flags&(~PTE_U));
   }
   return 0;
 
  err:
   uvmunmap(new, 0, i / PGSIZE, 1);
+  //uvmunmap(child->kernel_pagetable, 0, i / PGSIZE, 1);
   return -1;
+}
+
+//added by myself
+//Change user part of the kernel page table according to a new pagetable.
+//To support exec.
+int
+uvm2kvm(pagetable_t pagetable,pagetable_t kernel_pagetable,uint64 from, uint64 to)
+{
+  pte_t *pte,*kpte;
+  uint64 pa, i;
+  uint flags;
+
+  for(i = from; i < to; i += PGSIZE){
+    if((pte = walk(pagetable, i, 0)) == 0)
+      panic("uvm2kvm: pte should exist");
+    if((kpte = walk(kernel_pagetable, i, 1)) == 0)
+      panic("uvm2kvm: kpte walk failed");
+    pa = PTE2PA(*pte);
+    flags = PTE_FLAGS(*pte) & (~PTE_U);//important: clear PTE_U so that kernel can access this page!
+    *kpte = PA2PTE(pa) | flags;
+  }
+  return 0;
 }
 
 // mark a PTE invalid for user access.
@@ -348,6 +378,9 @@ uvmclear(pagetable_t pagetable, uint64 va)
   if(pte == 0)
     panic("uvmclear");
   *pte &= ~PTE_U;
+  //added by myself
+  //pte_t *kernel_pte=walk(kernel_pagetable, va, 0);
+  //*kernel_pte &= ~PTE_U;
 }
 
 // Copy from kernel to user.
@@ -381,7 +414,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
-  uint64 n, va0, pa0;
+  /*uint64 n, va0, pa0;
 
   while(len > 0){
     va0 = PGROUNDDOWN(srcva);
@@ -397,7 +430,8 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
     dst += n;
     srcva = va0 + PGSIZE;
   }
-  return 0;
+  return 0;*/
+  return copyin_new(pagetable,dst,srcva,len);
 }
 
 // Copy a null-terminated string from user to kernel.
@@ -407,7 +441,7 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 int
 copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 {
-  uint64 n, va0, pa0;
+  /*uint64 n, va0, pa0;
   int got_null = 0;
 
   while(got_null == 0 && max > 0){
@@ -440,7 +474,8 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return 0;
   } else {
     return -1;
-  }
+  }*/
+  return copyinstr_new(pagetable,dst,srcva,max);
 }
 
 // Recursively print page-table pages.

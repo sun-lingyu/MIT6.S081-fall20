@@ -2651,10 +2651,11 @@ main(int argc, char *argv[])
     {pgbug, "pgbug" },
     {sbrkbugs, "sbrkbugs" },
     // {badwrite, "badwrite" },
+    
     {badarg, "badarg" },
     {reparent, "reparent" },
     {twochildren, "twochildren"},
-    {forkfork, "forkfork"},
+    {forkfork, "forkfork"},*/
     //this one can cause stuck???
     {forkforkfork, "forkforkfork"},
     {argptest, "argptest"},
@@ -2697,6 +2698,7 @@ main(int argc, char *argv[])
     {forktest, "forktest"},
     {bigdir, "bigdir"}, // slow
     { 0, 0},
+    
   };
 
   if(continuous){

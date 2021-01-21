@@ -99,7 +99,7 @@ void kernelstackfree(struct proc *p)
 void
 proc_freekernelpagetable(pagetable_t pagetable)
 {
-
+/*
   //printf("proc_freekernelpagetable\n");
   uvmunmap(pagetable, UART0, 1, 0);
   uvmunmap(pagetable, VIRTIO0, 1, 0);
@@ -108,8 +108,20 @@ proc_freekernelpagetable(pagetable_t pagetable)
   uvmunmap(pagetable, KERNBASE, ((uint64)etext-KERNBASE)/PGSIZE, 0);
   uvmunmap(pagetable, (uint64)etext, (PHYSTOP-(uint64)etext)/PGSIZE, 0);
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
-  //printf("proc_freekernelpagetable last one\n");
+  printf("proc_freekernelpagetable last one\n");
   freewalk(pagetable);
+*/
+  for (int i = 0; i < 512; i++) {
+		pte_t pte = pagetable[i];
+		if (pte & PTE_V) {
+			pagetable[i] = 0;
+			if ((pte & (PTE_R|PTE_W|PTE_X)) == 0) {
+				uint64 child = PTE2PA(pte);
+				proc_freekernelpagetable((pagetable_t)child);
+			}
+		}
+	} 
+	kfree((void*)pagetable);
 }
 
 //---------added by myself end------------
@@ -223,7 +235,6 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
-
   return p;
 }
 
@@ -238,6 +249,9 @@ freeproc(struct proc *p)
   p->trapframe = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
+
+  //free user part in kernel page table
+  uvmunmap(p->kernel_pagetable, 0, PGROUNDUP(p->sz)/PGSIZE, 0);
 
   //free kernel stack
   kernelstackfree(p);
@@ -288,6 +302,7 @@ proc_pagetable(struct proc *p)
     uvmfree(pagetable, 0);
     return 0;
   }
+  
 
   return pagetable;
 }
@@ -319,14 +334,16 @@ void
 userinit(void)
 {
   struct proc *p;
-
   p = allocproc();
   initproc = p;
   
   // allocate one user page and copy init's instructions
   // and data into it.
-  uvminit(p->pagetable, initcode, sizeof(initcode));
+  uvminit(p->pagetable,p->kernel_pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
+
+  //copy user pagetable to kernelpagetable for the first process!
+  uvm2kvm(p->pagetable,p->kernel_pagetable,0,p->sz);
 
   // prepare for the very first "return" from kernel to user.
   p->trapframe->epc = 0;      // user program counter
@@ -350,11 +367,19 @@ growproc(int n)
 
   sz = p->sz;
   if(n > 0){
+
+    //added by myself: PLIC check
+    if(PGROUNDUP(sz+n)>PLIC)
+    {
+      return -1;
+    }
     if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
     }
+    uvm2kvm(p->pagetable,p->kernel_pagetable,sz-n,sz);
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
+    uvm2kvm(p->pagetable,p->kernel_pagetable,sz,sz-n);//n is negative, so sz-n > n.
   }
   p->sz = sz;
   return 0;
@@ -381,6 +406,8 @@ fork(void)
     return -1;
   }
   np->sz = p->sz;
+
+  uvm2kvm(np->pagetable,np->kernel_pagetable,0,np->sz);
 
   np->parent = p;
 
@@ -588,7 +615,7 @@ scheduler(void)
 
         w_satp(MAKE_SATP(p->kernel_pagetable));
         sfence_vma();
-        //printf("scheduler inside2\n");
+        //printf("scheduler %d inside2\n",cpuid());
 
         swtch(&c->context, &p->context);
 
