@@ -2658,7 +2658,7 @@ main(int argc, char *argv[])
     {forkforkfork, "forkforkfork"},
     {argptest, "argptest"},
     {createdelete, "createdelete"},
-    {linkunlink, "linkunlink"},
+    {linkunlink, "linkunl"},
     {linktest, "linktest"},
     {unlinkread, "unlinkread"},
     {concreate, "concreate"},
@@ -2695,6 +2695,7 @@ main(int argc, char *argv[])
     {forktest, "forktest"},
     {bigdir, "bigdir"}, // slow
     { 0, 0},
+    
   };
 
   if(continuous){
