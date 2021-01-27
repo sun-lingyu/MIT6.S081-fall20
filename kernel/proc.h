@@ -107,5 +107,8 @@ struct proc {
   //added to support sigalarm
   int tick;
   int tickpassed;
-  void (*handler)();
+  uint64 handler;
+  int inhandler;
+  int shouldreturn;
+  struct trapframe alarm_context;
 };
