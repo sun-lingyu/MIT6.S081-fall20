@@ -1,3 +1,12 @@
+未能通过alarmtest的test1，会报i!=j的错误。
+经与他人博客的检查比对，与正确代码几乎一致，未能发现不同。
+采取了将自己的关键代码段替换为他人的方式，仍然不能通过。
+尝试使用gdb按汇编代码逐行调试，确定是否是由于跳转回的汇编代码位置不对导致。但gdb会在uservecret的最后一行，即sret指令处卡住，无法继续--->失败。
+经测试，保存j的地址的寄存器始终是正确的。然而在test1中第一次调用sys_sigreturn后j的值会变成随机值，常见为0，少数情况为1，极少数情况为较大随机值。
+应该是j的值被以某种错误的方式改变了。可能是错误的使用了保存j的地址的寄存器。
+
+未能改正该错误。
+
 xv6 is a re-implementation of Dennis Ritchie's and Ken Thompson's Unix
 Version 6 (v6).  xv6 loosely follows the structure and style of v6,
 but is implemented for a modern RISC-V multiprocessor using ANSI C.
