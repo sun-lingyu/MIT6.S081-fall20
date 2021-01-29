@@ -5,6 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
 
 /*
  * the kernel's page table.
@@ -101,10 +103,27 @@ walkaddr(pagetable_t pagetable, uint64 va)
     return 0;
 
   pte = walk(pagetable, va, 0);
-  if(pte == 0)
-    return 0;
-  if((*pte & PTE_V) == 0)
-    return 0;
+  if(pte == 0 || (*pte & PTE_V) == 0)
+  {
+    struct proc*p=myproc();
+    if(va<p->sz && !(va<p->trapframe->sp))//lazy allocation
+    {
+      uint64 pgstart=PGROUNDDOWN(va);
+      int ret=uvmalloc(pagetable,pgstart, pgstart+PGSIZE);
+      if(ret==0)
+      {
+        printf("uvmalloc: run out of memory. kill it.\n");
+        p->killed = 1;
+        return 0;
+      }
+      pte = walk(pagetable, va, 0);
+    }
+    else//somthing really wrong
+    {
+      return 0;
+    }
+    
+  }
   if((*pte & PTE_U) == 0)
     return 0;
   pa = PTE2PA(*pte);
@@ -178,15 +197,19 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 
   if((va % PGSIZE) != 0)
     panic("uvmunmap: not aligned");
-
+  //change to support lazy allocation
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
     if((pte = walk(pagetable, a, 0)) == 0)
-      panic("uvmunmap: walk");
+      continue;
+    //  panic("uvmunmap: walk");
+    
     if((*pte & PTE_V) == 0)
-      panic("uvmunmap: not mapped");
+      continue;
+    //  panic("uvmunmap: not mapped");
+      
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
-    if(do_free){
+    if(do_free && !((*pte & PTE_V) == 0)){
       uint64 pa = PTE2PA(*pte);
       kfree((void*)pa);
     }
@@ -315,9 +338,12 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
-      panic("uvmcopy: pte should exist");
+      continue;
+    //  panic("uvmcopy: pte should exist");
+    //change to support lazy allocation
     if((*pte & PTE_V) == 0)
-      panic("uvmcopy: page not present");
+      continue;
+    //  panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
     if((mem = kalloc()) == 0)

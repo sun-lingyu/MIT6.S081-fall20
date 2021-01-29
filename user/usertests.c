@@ -2394,6 +2394,7 @@ stacktest(char *s)
   int xstatus;
   
   pid = fork();
+  printf("forked\n");
   if(pid == 0) {
     char *sp = (char *) r_sp();
     sp -= PGSIZE;

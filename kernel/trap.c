@@ -68,9 +68,26 @@ usertrap(void)
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
-    printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
-    printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
-    p->killed = 1;
+
+    //add to support lazy allocation
+    //need to check:
+    //(1): page fault above allocated size
+    //(2): page fault ***in guard page***[wrong! should be:] ***above stack pointer***
+    //similar codes are also in walkaddr() in vm.c!
+    if((r_scause()==13 || r_scause()==15) && r_stval()<p->sz && !(r_stval()<p->trapframe->sp))//important:use p->trapframe->sp to ensure: this page fault is above stack pointer. 
+    {
+      uint64 pgstart=PGROUNDDOWN(r_stval());
+      int ret=uvmalloc(p->pagetable,pgstart, pgstart+PGSIZE);
+      if(ret==0)
+        goto error;
+    }
+    else
+    {
+      error:
+      printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+      p->killed = 1;
+    }
   }
 
   if(p->killed)
@@ -144,6 +161,7 @@ kerneltrap()
     panic("kerneltrap: interrupts enabled");
 
   if((which_dev = devintr()) == 0){
+    
     printf("scause %p\n", scause);
     printf("sepc=%p stval=%p\n", r_sepc(), r_stval());
     panic("kerneltrap");

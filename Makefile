@@ -246,6 +246,9 @@ fs.img: mkfs/mkfs README $(UEXTRA) $(UPROGS)
 
 -include kernel/*.d user/*.d
 
+gdb: 
+	gdb-multiarch kernel/kernel
+
 clean: 
 	rm -f *.tex *.dvi *.idx *.aux *.log *.ind *.ilg \
 	*/*.o */*.d */*.asm */*.sym \
@@ -387,3 +390,4 @@ myapi.key:
 
 
 .PHONY: handin tarball tarball-pref clean grade handin-check
+
