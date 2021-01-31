@@ -5,6 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
 
 /*
  * the kernel's page table.
@@ -15,6 +17,7 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
+extern int COW_count[];
 /*
  * create a direct-map page table for the kernel.
  */
@@ -311,20 +314,26 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
+  //char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
+    //changed to support COW:
+    //clear PTE_W on both child and parent
+    *pte &= ~PTE_W;
+    
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    
+    COW_count[(uint64)pa/PGSIZE]+=1;
+    //if((mem = kalloc()) == 0)
+    //  goto err;
+    //memmove(mem, (char*)pa, PGSIZE);
+
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
       goto err;
     }
   }
@@ -355,12 +364,61 @@ int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
   uint64 n, va0, pa0;
+  uint flags;
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
+    //------------------------
+    //since walkaddr does not return flags, we need to unfold it here.
+    //pa0 = walkaddr(pagetable, va0);
+    pte_t *pte;
+    uint64 pa;
+
+
+    if(dstva >= MAXVA)
       return -1;
+
+    pte = walk(pagetable, va0, 0);
+    if(pte == 0)
+      return -1;
+    if((*pte & PTE_V) == 0)
+      return -1;
+    if((*pte & PTE_U) == 0)
+      return -1;
+    pa = PTE2PA(*pte);    
+      
+    //-------
+    //printf("enter copyin\n");
+    struct proc*p=myproc();
+    if((((*pte)&(PTE_W))==0) && dstva<p->sz && !(dstva<p->trapframe->sp && dstva>=p->guardpage))
+    {
+      char *mem;
+      if(COW_count[(uint64)pa/PGSIZE]>1)
+      {
+        flags = PTE_FLAGS(*pte);
+
+        //copy on write
+        if((mem = kalloc()) == 0)
+          exit(-1);
+        memmove(mem, (char*)pa, PGSIZE);
+        COW_count[(uint64)pa/PGSIZE]--;
+
+        *pte = PA2PTE((uint64)mem) | flags | PTE_W;
+      }
+      else
+      {
+        *pte|=PTE_W;
+
+      }
+    }
+    else if(((*pte)&(PTE_W))==0)//not supposed to happen
+    {
+      panic("write to unexpected address");
+    }
+      
+    pa0 = PTE2PA(*pte);
+    //------------------------
+
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;

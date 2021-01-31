@@ -11,6 +11,7 @@ uint ticks;
 
 extern char trampoline[], uservec[], userret[];
 
+extern int COW_count[];
 // in kernelvec.S, calls kerneltrap().
 void kernelvec();
 
@@ -68,9 +69,50 @@ usertrap(void)
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
-    printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
-    printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
-    p->killed = 1;
+    //add to support copy on write.
+    //need to check:
+    //(1): page fault below allocated size
+    //(2): page fault above stack pointer
+    //(3): page fault below guardpage
+    //similar codes are also in walkaddr() in vm.c!
+    if((r_scause()==13 || r_scause()==15) && r_stval()<p->sz && !(r_stval()<p->trapframe->sp && r_stval()>=p->guardpage))//important:not in guard page or below sp. 
+    {
+      uint64 pgstart=PGROUNDDOWN(r_stval());
+      char *mem;
+      pte_t *pte;
+      uint64 pa;
+      uint flags;
+
+      if((pte = walk(p->pagetable, pgstart, 0)) == 0)
+        panic("trap: pte should exist");
+      if((*pte & PTE_V) == 0)
+        panic("trap: page not present");
+      pa = PTE2PA(*pte);
+
+      if(COW_count[(uint64)pa/PGSIZE]>1)
+      {
+        
+        flags = PTE_FLAGS(*pte);
+        //copy on write
+        if((mem = kalloc()) == 0)
+          exit(-1);
+          //goto error;
+        memmove(mem, (char*)pa, PGSIZE);
+        COW_count[(uint64)pa/PGSIZE]--;
+        *pte = PA2PTE((uint64)mem) | flags | PTE_W;
+      }
+      else
+      {
+        *pte|=PTE_W;
+      }
+    }
+    else
+    {
+      //error:
+      printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+      p->killed = 1;
+    }
   }
 
   if(p->killed)

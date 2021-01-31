@@ -109,6 +109,7 @@ exec(char *path, char **argv)
   safestrcpy(p->name, last, sizeof(p->name));
     
   // Commit to the user image.
+  p->guardpage = stackbase-PGSIZE;
   oldpagetable = p->pagetable;
   p->pagetable = pagetable;
   p->sz = sz;

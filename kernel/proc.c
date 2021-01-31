@@ -106,6 +106,7 @@ allocproc(void)
 
 found:
   p->pid = allocpid();
+  p->guardpage=0;
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
@@ -224,6 +225,7 @@ userinit(void)
   // prepare for the very first "return" from kernel to user.
   p->trapframe->epc = 0;      // user program counter
   p->trapframe->sp = PGSIZE;  // user stack pointer
+  p->guardpage=PGSIZE;
 
   safestrcpy(p->name, "initcode", sizeof(p->name));
   p->cwd = namei("/");
@@ -276,6 +278,8 @@ fork(void)
   np->sz = p->sz;
 
   np->parent = p;
+
+  np->guardpage=p->guardpage;
 
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
