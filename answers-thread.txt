@@ -1,0 +1,2 @@
+When multiple threads executing insert simutaneously, there can be missing keys.
+Suppose 2 threads are both executing the last sequence in insert. Their newly inserted node both point to the same n. Only one of them can really insert, and the other's reference will be lost.

@@ -12,6 +12,7 @@ struct barrier {
   pthread_cond_t barrier_cond;
   int nthread;      // Number of threads that have reached this round of the barrier
   int round;     // Barrier round
+  int flag;
 } bstate;
 
 static void
@@ -20,6 +21,8 @@ barrier_init(void)
   assert(pthread_mutex_init(&bstate.barrier_mutex, NULL) == 0);
   assert(pthread_cond_init(&bstate.barrier_cond, NULL) == 0);
   bstate.nthread = 0;
+  bstate.round = 0;
+  bstate.flag=0;//是否还有线程在上一轮 
 }
 
 static void 
@@ -30,7 +33,29 @@ barrier()
   // Block until all threads have called barrier() and
   // then increment bstate.round.
   //
+  pthread_mutex_lock(&bstate.barrier_mutex);       // acquire lock
+  while(bstate.flag==1)//还有线程在上一轮 
+  {
+    pthread_cond_wait(&bstate.barrier_cond, &bstate.barrier_mutex);
+  }
+  bstate.nthread++;
+
+  if(bstate.nthread==nthread)
+  {
+    bstate.round++;
+    bstate.flag=1;
+    pthread_cond_broadcast(&bstate.barrier_cond);     // 唤醒由于bstate.nthread!=nthread而等待的线程
+  } 
+  else
+    pthread_cond_wait(&bstate.barrier_cond, &bstate.barrier_mutex);//当此函数返回时，必有bstate.flag==1
   
+  bstate.nthread--;
+  if(bstate.nthread==0)//上一轮的全部线程都已经唤醒
+  {
+    bstate.flag=0;
+    pthread_cond_broadcast(&bstate.barrier_cond);     // 唤醒由于bstate.flag==1而等待的线程
+  }    
+  pthread_mutex_unlock(&bstate.barrier_mutex);     // release lock
 }
 
 static void *
