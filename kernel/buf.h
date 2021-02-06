@@ -8,5 +8,9 @@ struct buf {
   struct buf *prev; // LRU cache list
   struct buf *next;
   uchar data[BSIZE];
+
+  //added to support hash table
+  uint used;
+  uint timestamp;
 };
 

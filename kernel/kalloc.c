@@ -19,15 +19,18 @@ struct run {
 };
 
 struct {
-  struct spinlock lock;
-  struct run *freelist;
+  struct spinlock lock[NCPU];
+  struct run *freelist[NCPU];
 } kmem;
 
 void
 kinit()
 {
-  initlock(&kmem.lock, "kmem");
-  freerange(end, (void*)PHYSTOP);
+  //only cpu0 can invoke this funciton.(refer to main.c to find details)
+  //initialize locks
+  for(int i=0;i<NCPU;i++)
+    initlock(&kmem.lock[i], "kmem");
+  freerange(end, (void*)PHYSTOP);//Let freerange give all free memory to the CPU running freerange.
 }
 
 void
@@ -56,10 +59,14 @@ kfree(void *pa)
 
   r = (struct run*)pa;
 
-  acquire(&kmem.lock);
-  r->next = kmem.freelist;
-  kmem.freelist = r;
-  release(&kmem.lock);
+  push_off();
+  acquire(&kmem.lock[cpuid()]);
+
+  r->next = kmem.freelist[cpuid()];
+  kmem.freelist[cpuid()] = r;
+  
+  release(&kmem.lock[cpuid()]);
+  pop_off();
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -70,11 +77,38 @@ kalloc(void)
 {
   struct run *r;
 
-  acquire(&kmem.lock);
-  r = kmem.freelist;
+  push_off();
+  acquire(&kmem.lock[cpuid()]);
+  r = kmem.freelist[cpuid()];
   if(r)
-    kmem.freelist = r->next;
-  release(&kmem.lock);
+  {
+    kmem.freelist[cpuid()] = r->next;
+    release(&kmem.lock[cpuid()]);
+  }
+  else
+  {
+    //steal from other cpus.
+    struct run *r1;
+    //how to avoid deadlock is a big issue!!!(even if deadlocks are not avoided, we may also pass the test!)
+    //first give up my own lock, and then acquire lock in sequence!
+    release(&kmem.lock[cpuid()]);
+    for(int j=0;j<NCPU;j++)
+    {
+      if(j==cpuid())
+        continue;
+      acquire(&kmem.lock[j]);
+      r1=kmem.freelist[j];
+      if(r1)
+      {
+        r=r1;
+        kmem.freelist[j]=r->next;
+        release(&kmem.lock[j]);
+        break;
+      }
+      release(&kmem.lock[j]);
+    }
+  }
+  pop_off();
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
