@@ -166,6 +166,7 @@ end_op(void)
   if(do_commit){
     // call commit w/o holding locks, since not allowed
     // to sleep with locks.
+    // !! do not need locks here, because log.committing==1 has ensured no other transaction is on. 
     commit();
     acquire(&log.lock);
     log.committing = 0;

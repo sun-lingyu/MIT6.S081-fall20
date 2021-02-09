@@ -145,7 +145,7 @@ sys_link(void)
   if((dp = nameiparent(new, name)) == 0)
     goto bad;
   ilock(dp);
-  if(dp->dev != ip->dev || dirlink(dp, name, ip->inum) < 0){
+  if(dp->dev != ip->dev || dirlink(dp, name, ip->inum) < 0){//此处可以不加锁(icache.lock)读取ip->dev, ip->inum，是因为ip->ref必不为0，所有对ip的访问只会读取而不会修改这两个值。
     iunlockput(dp);
     goto bad;
   }
@@ -218,7 +218,7 @@ sys_unlink(void)
   memset(&de, 0, sizeof(de));
   if(writei(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de))
     panic("unlink: writei");
-  if(ip->type == T_DIR){
+  if(ip->type == T_DIR){//for ..
     dp->nlink--;
     iupdate(dp);
   }
@@ -253,6 +253,8 @@ create(char *path, short type, short major, short minor)
     iunlockput(dp);
     ilock(ip);
     if(type == T_FILE && (ip->type == T_FILE || ip->type == T_DEVICE))
+      return ip;
+    if(type == T_SYMLINK && ip->type == T_SYMLINK)
       return ip;
     iunlockput(ip);
     return 0;
@@ -291,12 +293,46 @@ sys_open(void)
   struct file *f;
   struct inode *ip;
   int n;
+  int depth = 0;
 
   if((n = argstr(0, path, MAXPATH)) < 0 || argint(1, &omode) < 0)
     return -1;
 
   begin_op();
 
+  if((omode & O_NOFOLLOW)==0)//need to check for symlink
+  {
+    if ((ip = namei(path)) == 0)
+    { //not exist, so can't be a symlink.
+      goto normal;
+    }
+    ilock(ip);
+
+    while(ip->type == T_SYMLINK && depth<10){
+      depth++;
+      if ((n = readi(ip, 0, (uint64)path, 0, ip->size)) != ip->size)
+      {
+        iunlockput(ip);
+        end_op();
+        return -1;
+      }
+      iunlockput(ip);
+
+      if((ip=namei(path))==0)
+        goto normal;
+
+      ilock(ip);
+    }
+    if(depth==10)
+    {
+      iunlockput(ip);
+      end_op();
+      return -1;
+    }
+    iunlockput(ip); 
+  }
+
+  normal:
   if(omode & O_CREATE){
     ip = create(path, T_FILE, 0, 0);
     if(ip == 0){
@@ -482,5 +518,37 @@ sys_pipe(void)
     fileclose(wf);
     return -1;
   }
+  return 0;
+}
+
+uint64
+sys_symlink(void)
+{
+  //printf("sys_symlink\n");
+  char path[MAXPATH];
+  char target[MAXPATH];
+  struct inode* ip;
+  int n;
+
+  if((n=argstr(0, target, MAXPATH)) < 0 || (argstr(1, path, MAXPATH)) < 0)
+    return -1;
+
+  begin_op();
+
+  if((ip=create(path,T_SYMLINK,0, 0))==0)
+  {
+    printf("create path failed.\n");
+    end_op();
+    return -1;
+  }
+  if((writei(ip,0,(uint64)target,0,n)) != n)
+  {
+    printf("write target to path wrong.\n");
+    end_op();
+    return -1;
+  }
+  iunlockput(ip);
+  end_op();
+
   return 0;
 }
