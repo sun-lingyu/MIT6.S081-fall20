@@ -113,6 +113,8 @@ allocproc(void)
 
 found:
   p->pid = allocpid();
+  p->vmalimit = MAXVA-2*PGSIZE;
+  p->vmanum = 0;
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
@@ -157,6 +159,8 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  p->vmalimit = MAXVA-2*PGSIZE;
+  p->vmanum = 0;
 }
 
 // Create a user page table for a given process,
@@ -301,6 +305,14 @@ fork(void)
   pid = np->pid;
 
   np->state = RUNNABLE;
+
+  np->vmalimit = p->vmalimit;
+
+  np->vmanum=p->vmanum;
+
+  for (int i = 0; i < p->vmanum;i++){
+    np->vmalist[i] = p->vmalist[i];
+  }
 
   release(&np->lock);
 

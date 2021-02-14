@@ -484,3 +484,74 @@ sys_pipe(void)
   }
   return 0;
 }
+
+uint64
+sys_mmap(void)
+{
+  printf("sys_mmap\n");
+  uint64 addr;
+  int length;
+  int prot;
+  int flags;
+  int fd;
+  int offset;
+  struct proc *p = myproc();
+
+  if(argaddr(0, &addr) < 0)
+    return -1;
+  if(argint(1, &length) < 0 || argint(2, &prot) < 0 || argint(3, &flags) < 0 || argint(4, &fd) < 0 || argint(5, &offset) < 0)
+    return -1;
+  if(length<=0)
+    return -1;
+  if(addr!=0)
+  {
+    printf("not implemeted yet when addr!=0!\n");
+    return -1;
+  }
+  if(p->ofile[fd]->type!=FD_INODE)
+  {
+    printf("file descriptor is not a regular file!\n");
+    return -1;
+  }
+  if(p->vmanum==16)
+  {
+    printf("can not mmap more files.(already 16 files mapped.)\n");
+    return -1;
+  }
+
+  //If the length argument is not a page size multiple it will be rounded up to page size multiple.
+  length = (PGROUNDUP(length));
+
+  //Note: Once you map a file in memory, you cannot increase its size. 
+  
+  p->vmalist[p->vmanum].length = length;
+  p->vmalist[p->vmanum].prot = prot;
+  p->vmalist[p->vmanum].flags = flags;
+  p->vmalist[p->vmanum].fp = p->ofile[fd];
+  p->vmalist[p->vmanum].offset = offset;
+
+  //find proper place to put the file
+  if(walkaddr(p->pagetable,p->vmalimit-length)!=0)
+  {
+    printf("no enough space\n");
+    return -1;
+  }
+  p->vmalist[p->vmanum].addr = p->vmalimit-length;
+  
+  //pin the file
+  filedup(p->vmalist[p->vmanum].fp); 
+  
+  p->vmanum += 1;
+  p->vmalimit -= length;
+  //Note: in munmap, need to rearrange vmas below the unmapped one.
+  //This can ensure p->vmanum is the first unallocated vma.
+
+  return p->vmalimit;
+}
+
+uint64
+sys_munmap(void)
+{
+  printf("sys_munmap\n");
+  return 0;
+}

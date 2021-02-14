@@ -82,8 +82,19 @@ struct trapframe {
 
 enum procstate { UNUSED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
+//added to support mmap
+struct vma{
+  uint64 addr;
+  int length;
+  int prot;
+  int flags;
+  struct file * fp;//not the file descriptor, since the file can be closed.
+  int offset;
+};
+
 // Per-process state
-struct proc {
+struct proc
+{
   struct spinlock lock;
 
   // p->lock must be held when using these:
@@ -103,4 +114,7 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  struct vma vmalist[16];
+  uint64 vmalimit;
+  int vmanum;
 };

@@ -5,6 +5,11 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fcntl.h"
+#include "sleeplock.h"
+#include "fs.h"
+#include "file.h"
+
 
 struct spinlock tickslock;
 uint ticks;
@@ -68,9 +73,55 @@ usertrap(void)
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
-    printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
-    printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
-    p->killed = 1;
+
+    //modify based on lazy allocation lab.
+
+    if((r_scause()==13 || r_scause()==15) && r_stval()<MAXVA-2*PGSIZE && r_stval()>=p->vmalimit)//important:use p->trapframe->sp to ensure: this page fault is above stack pointer. 
+    {
+      //find the corresponding vma
+      int which_vma;
+      for (which_vma = 0; which_vma < p->vmanum; which_vma++)
+      {
+        if(r_stval()>=p->vmalist[which_vma].addr && r_stval()<p->vmalist[which_vma].addr+p->vmalist[which_vma].length)
+          break;
+      }
+
+      //allcate new page
+      uint64 pgstart=PGROUNDDOWN(r_stval());
+      char *mem = kalloc();
+      memset(mem, 0, PGSIZE);
+      if (mem == 0)
+      {
+        goto error;
+      }
+      int flag = PTE_U;//set flag
+      if((p->vmalist[which_vma].prot&PROT_READ)!=0)
+      {
+        flag |= PTE_R;
+      }
+      if((p->vmalist[which_vma].prot&PROT_WRITE)!=0)
+      {
+        flag |= PTE_W;
+      }
+        
+      if (mappages(p->pagetable, pgstart, PGSIZE, (uint64)mem, flag) != 0)
+      {
+        kfree(mem);
+        goto error;
+      }
+
+      //copy file into the page
+      ilock(p->vmalist[which_vma].fp->ip);
+      readi(p->vmalist[which_vma].fp->ip, 1, pgstart, p->vmalist[which_vma].offset + pgstart - p->vmalist[which_vma].addr, PGSIZE);
+      iunlock(p->vmalist[which_vma].fp->ip);
+    }
+    else
+    {
+      error:
+      printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+      p->killed = 1;
+    }
   }
 
   if(p->killed)
