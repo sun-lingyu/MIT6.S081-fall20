@@ -76,15 +76,20 @@ usertrap(void)
 
     //modify based on lazy allocation lab.
 
-    if((r_scause()==13 || r_scause()==15) && r_stval()<MAXVA-2*PGSIZE && r_stval()>=p->vmalimit)//important:use p->trapframe->sp to ensure: this page fault is above stack pointer. 
+    if((r_scause()==13 || r_scause()==15) && r_stval()<MAXVA-2*PGSIZE)//important:use p->trapframe->sp to ensure: this page fault is above stack pointer. 
     {
       //find the corresponding vma
       int which_vma;
-      for (which_vma = 0; which_vma < p->vmanum; which_vma++)
+      for (which_vma = 0; which_vma < 16; which_vma++)
       {
-        if(r_stval()>=p->vmalist[which_vma].addr && r_stval()<p->vmalist[which_vma].addr+p->vmalist[which_vma].length)
+        if(!p->vmalist[which_vma].valid)
+          continue;
+        if (r_stval() >= p->vmalist[which_vma].addr && r_stval() < p->vmalist[which_vma].addr + p->vmalist[which_vma].length)
           break;
       }
+      //not in any vma
+      if(which_vma==16)
+        goto error;
 
       //allcate new page
       uint64 pgstart=PGROUNDDOWN(r_stval());

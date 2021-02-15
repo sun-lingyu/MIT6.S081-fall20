@@ -113,11 +113,12 @@ allocproc(void)
 
 found:
   p->pid = allocpid();
-  p->vmalimit = MAXVA-2*PGSIZE;
-  p->vmanum = 0;
+  for (int i = 0; i < 16;i++)
+    p->vmalist[i].valid = 0;
 
   // Allocate a trapframe page.
-  if((p->trapframe = (struct trapframe *)kalloc()) == 0){
+  if ((p->trapframe = (struct trapframe *)kalloc()) == 0)
+  {
     release(&p->lock);
     return 0;
   }
@@ -159,8 +160,8 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
-  p->vmalimit = MAXVA-2*PGSIZE;
-  p->vmanum = 0;
+  for (int i = 0; i < 16;i++)
+    p->vmalist[i].valid = 0;
 }
 
 // Create a user page table for a given process,
@@ -306,13 +307,14 @@ fork(void)
 
   np->state = RUNNABLE;
 
-  np->vmalimit = p->vmalimit;
 
-  np->vmanum=p->vmanum;
-
-  for (int i = 0; i < p->vmanum;i++){
+  for (int i = 0; i < 16;i++){
     np->vmalist[i] = p->vmalist[i];
+    if(np->vmalist[i].valid)
+      filedup(np->vmalist[i].fp);
   }
+
+  
 
   release(&np->lock);
 
@@ -356,14 +358,30 @@ exit(int status)
   if(p == initproc)
     panic("init exiting");
 
+  // Close all mapped files.
+  for (int v = 0; v < 16;v++)
+  {
+    if(!p->vmalist[v].valid)
+      continue;
+    for (uint64 a = p->vmalist[v].addr + p->vmalist[v].length - PGSIZE; a >= p->vmalist[v].addr; a -= PGSIZE)
+    {
+      if((walkaddr(p->pagetable,a))!=0)
+      {
+        uvmunmap(p->pagetable, a, 1, 1);
+      }
+    }
+  }
+
   // Close all open files.
-  for(int fd = 0; fd < NOFILE; fd++){
-    if(p->ofile[fd]){
+  for (int fd = 0; fd < NOFILE; fd++)
+  {
+    if (p->ofile[fd])
+    {
       struct file *f = p->ofile[fd];
       fileclose(f);
       p->ofile[fd] = 0;
     }
-  }
+    }
 
   begin_op();
   iput(p->cwd);

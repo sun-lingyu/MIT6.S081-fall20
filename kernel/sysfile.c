@@ -488,7 +488,6 @@ sys_pipe(void)
 uint64
 sys_mmap(void)
 {
-  printf("sys_mmap\n");
   uint64 addr;
   int length;
   int prot;
@@ -513,45 +512,128 @@ sys_mmap(void)
     printf("file descriptor is not a regular file!\n");
     return -1;
   }
-  if(p->vmanum==16)
+  if(p->ofile[fd]->writable==0 && (prot&PROT_WRITE)!=0 &&(flags&MAP_SHARED)!=0)
   {
-    printf("can not mmap more files.(already 16 files mapped.)\n");
+    printf("PROT_WRITE on read only file.\n");
     return -1;
   }
 
   //If the length argument is not a page size multiple it will be rounded up to page size multiple.
   length = (PGROUNDUP(length));
 
-  //Note: Once you map a file in memory, you cannot increase its size. 
-  
-  p->vmalist[p->vmanum].length = length;
-  p->vmalist[p->vmanum].prot = prot;
-  p->vmalist[p->vmanum].flags = flags;
-  p->vmalist[p->vmanum].fp = p->ofile[fd];
-  p->vmalist[p->vmanum].offset = offset;
-
-  //find proper place to put the file
-  if(walkaddr(p->pagetable,p->vmalimit-length)!=0)
+  //Note: Once you map a file in memory, you cannot increase its size.
+  int which_vma=0;
+  uint64 pre_addr;
+  uint64 aft_addr;
+  for (; which_vma < 16; which_vma++)
   {
-    printf("no enough space\n");
+    if (p->vmalist[which_vma].valid)
+      continue;
+    pre_addr = MAXVA - 2 * PGSIZE;
+    aft_addr = PGROUNDUP(p->trapframe->sp);
+    //find adjacent valid vma in list
+    for (int pre_vma = which_vma; pre_vma >= 0; pre_vma--)
+      if (p->vmalist[pre_vma].valid)
+      {
+        pre_addr = p->vmalist[pre_vma].addr;
+        break;
+      }
+
+    for (int aft_vma = which_vma; aft_vma < 16; aft_vma++)
+      if (p->vmalist[aft_vma].valid)
+      {
+        aft_addr = p->vmalist[aft_vma].addr + p->vmalist[aft_vma].length;
+        break;
+      }
+
+    if (pre_addr - aft_addr >= length) //suitable
+      break;
+  }
+  if(which_vma==16)
+  {
+    printf("already mapped 16 vmas.\n");
     return -1;
   }
-  p->vmalist[p->vmanum].addr = p->vmalimit-length;
+  p->vmalist[which_vma].valid = 1;
+  p->vmalist[which_vma].length = length;
+  p->vmalist[which_vma].prot = prot;
+  p->vmalist[which_vma].flags = flags;
+  p->vmalist[which_vma].fp = p->ofile[fd];
+  p->vmalist[which_vma].offset = offset;
+  p->vmalist[which_vma].addr = pre_addr-length;
   
   //pin the file
-  filedup(p->vmalist[p->vmanum].fp); 
-  
-  p->vmanum += 1;
-  p->vmalimit -= length;
-  //Note: in munmap, need to rearrange vmas below the unmapped one.
-  //This can ensure p->vmanum is the first unallocated vma.
+  filedup(p->vmalist[which_vma].fp);
 
-  return p->vmalimit;
+  return p->vmalist[which_vma].addr;
 }
 
+//Note: in munmap, need to rearrange vmas below the unmapped one.
 uint64
 sys_munmap(void)
 {
-  printf("sys_munmap\n");
+  uint64 addr;
+  int length;
+  int which_vma;
+  struct proc *p = myproc();
+
+  if(argaddr(0, &addr) < 0 || argint(1,&length) < 0)
+    return -1;
+
+  if(length<=0)
+    return -1;
+  addr = (PGROUNDDOWN(addr));
+  //If the length argument is not a page size multiple it will be rounded up to page size multiple.
+  length = (PGROUNDUP(length));
+  
+  //find the corresponding vma
+  //Note: can assume that it will either unmap at the start, or at the end, or the whole region (but not punch a hole in the middle of a region)
+  
+  for (which_vma = 0; which_vma < 16; which_vma++)
+  {
+    if(addr>=p->vmalist[which_vma].addr && addr<p->vmalist[which_vma].addr+p->vmalist[which_vma].length)
+      break;
+  }
+  if(which_vma == 16)
+  {
+    printf("corresponding vma not found!\n");
+    return -1;
+  }
+
+  //unmap the region
+  for (uint64 a = addr; a < addr + length;a += PGSIZE)
+  {
+    if(walkaddr(p->pagetable,a))
+    {
+      //write back pages
+      //since we didn't define PTE_D (dirty bit), we can only write back all pages mapped.
+      if((p->vmalist[which_vma].flags&MAP_SHARED)!=0)
+      {
+        begin_op();
+        ilock(p->vmalist[which_vma].fp->ip);
+        writei(p->vmalist[which_vma].fp->ip, 1, a, p->vmalist[which_vma].offset + a - p->vmalist[which_vma].addr, PGSIZE);
+        iunlock(p->vmalist[which_vma].fp->ip);
+        end_op();
+      }
+      uvmunmap(p->pagetable, a, 1, 1);
+    }
+  }
+
+  if(addr == p->vmalist[which_vma].addr)//unmap from the start
+  {
+    p->vmalist[which_vma].addr += length;
+    p->vmalist[which_vma].offset += length;
+  }
+
+  p->vmalist[which_vma].length -= length;
+
+  //if whole vma unmmaped, close file
+  if (addr == p->vmalist[which_vma].addr && length == p->vmalist[which_vma].length)
+  {
+    fileclose(p->vmalist[which_vma].fp); 
+    p->vmalist[which_vma].valid=0; 
+  }
+  
+
   return 0;
 }

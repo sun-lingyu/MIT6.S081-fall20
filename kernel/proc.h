@@ -90,6 +90,7 @@ struct vma{
   int flags;
   struct file * fp;//not the file descriptor, since the file can be closed.
   int offset;
+  int valid;
 };
 
 // Per-process state
@@ -115,6 +116,4 @@ struct proc
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
   struct vma vmalist[16];
-  uint64 vmalimit;
-  int vmanum;
 };
