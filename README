@@ -1,3 +1,11 @@
+将heap的虚拟地址的最上面的部分作为文件映射的位置。
+起初试图实现内存整理（分配简单，回收复杂）：
+每次mmap时直接向下增长一块虚拟地址，每次munmap时回收一部分虚拟地址，并将其下面的已分配的映射向上压缩。这样可以使已分配的虚拟地址映射区域没有孔洞。
+但是这种方式会导致已经映射的虚拟地址发生改变。mmap初次分配时返回的虚拟地址将变得不正确。
+因此弃用了这种方法。
+改为munmap时保留空洞，每次mmap时首先遍历空洞看能否装入，再在最下方增长。（分配复杂，回收简单）
+
+
 xv6 is a re-implementation of Dennis Ritchie's and Ken Thompson's Unix
 Version 6 (v6).  xv6 loosely follows the structure and style of v6,
 but is implemented for a modern RISC-V multiprocessor using ANSI C.
