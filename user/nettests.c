@@ -34,12 +34,12 @@ ping(uint16 sport, uint16 dport, int attempts)
   }
 
   char ibuf[128];
+  
   int cc = read(fd, ibuf, sizeof(ibuf)-1);
   if(cc < 0){
     fprintf(2, "ping: recv() failed\n");
     exit(1);
   }
-
   close(fd);
   ibuf[cc] = '\0';
   if(strcmp(ibuf, "this is the host!") != 0){

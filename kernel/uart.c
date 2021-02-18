@@ -186,7 +186,6 @@ uartintr(void)
       break;
     consoleintr(c);
   }
-
   // send buffered characters.
   acquire(&uart_tx_lock);
   uartstart();

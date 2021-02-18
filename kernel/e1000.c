@@ -102,7 +102,28 @@ e1000_transmit(struct mbuf *m)
   // the TX descriptor ring so that the e1000 sends it. Stash
   // a pointer so that it can be freed after sending.
   //
-  
+  acquire(&e1000_lock);
+
+  if((tx_ring[regs[E1000_TDT]].status&E1000_TXD_STAT_DD)==0)//overflow
+  {
+    release(&e1000_lock);
+    return -1;
+  }  
+
+  if(tx_mbufs[regs[E1000_TDT]]!=0)
+    mbuffree(tx_mbufs[regs[E1000_TDT]]);
+  tx_mbufs[regs[E1000_TDT]] = m;
+
+  tx_ring[regs[E1000_TDT]].addr = (uint64)tx_mbufs[regs[E1000_TDT]]->head;
+  tx_ring[regs[E1000_TDT]].length=tx_mbufs[regs[E1000_TDT]]->len;
+
+  //need to add: cmd
+  tx_ring[regs[E1000_TDT]].cmd = E1000_TXD_CMD_EOP | E1000_TXD_CMD_RS;
+
+  regs[E1000_TDT] = (regs[E1000_TDT] + 1) % TX_RING_SIZE;
+
+  release(&e1000_lock);
+
   return 0;
 }
 
@@ -115,6 +136,30 @@ e1000_recv(void)
   // Check for packets that have arrived from the e1000
   // Create and deliver an mbuf for each packet (using net_rx()).
   //
+  //recv does not need lock.
+  //the recv process raises from the bottom of the stack.
+  //there is no concurrency issue here, since it is in the layer below processes.
+  //however, transmit process need to handle concurrency issue
+  //because transmit process raises from the top of the stack.
+  //multiple processes can ask to send at the same time.
+  while(1){
+  uint32 index = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
+  if ((rx_ring[index].status & E1000_RXD_STAT_DD)==0)
+    return;
+
+  rx_mbufs[index]->len=rx_ring[index].length;
+  net_rx(rx_mbufs[index]);
+
+  rx_mbufs[index] = mbufalloc(0);
+  if (!rx_mbufs[index])
+      panic("e1000");
+
+  rx_ring[index].addr = (uint64)rx_mbufs[index]->head;
+
+  rx_ring[index].status = 0;
+
+  regs[E1000_RDT] = index;
+  }
 }
 
 void
@@ -124,6 +169,5 @@ e1000_intr(void)
   // without this the e1000 won't raise any
   // further interrupts.
   regs[E1000_ICR] = 0xffffffff;
-
   e1000_recv();
 }
